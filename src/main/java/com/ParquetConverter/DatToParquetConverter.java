@@ -11,7 +11,9 @@ import org.apache.parquet.schema.PrimitiveType;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.hadoop.ParquetFileWriter;
+import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
+import org.apache.parquet.hadoop.example.GroupReadSupport;
 import org.apache.parquet.hadoop.example.GroupWriteSupport;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
@@ -26,7 +28,8 @@ public class DatToParquetConverter {
 
         public static void main(String[] args) {
                 if (args.length < 2) {
-                        System.err.println("Usage: DatToParquetConverter <inputDir> <outputDir>");
+                        System.err.println(
+                                        "Usage: DatToParquetConverter <inputDir> <outputDir> [compression] [--perf]");
                         System.exit(1);
                 }
 
@@ -34,8 +37,13 @@ public class DatToParquetConverter {
                 String outputDir = args[1];
 
                 String compression = "";
-                if (args.length == 3) {
+                if (args.length > 2) {
                         compression = args[2];
+                }
+
+                boolean runtimes = false;
+                if (args.length == 4 && args[3].equals("--perf")) {
+                        runtimes = true;
                 }
 
                 CompressionCodecName codec = CompressionCodecName.UNCOMPRESSED;
@@ -60,6 +68,7 @@ public class DatToParquetConverter {
                         return;
                 }
 
+                // Convert to parquet and time compression
                 for (File datFile : datFiles) {
                         String tableName = datFile.getName().replace(".dat", "");
                         TableInfo tableInfo = getTableInfo(tableName);
@@ -70,7 +79,53 @@ public class DatToParquetConverter {
                         }
 
                         String outputPath = new File(outputDir, tableName + ".parquet").getPath();
+
+                        // Skip if output file already exists
+                        if (new File(outputPath).exists()) {
+                                System.err.println("Skipping existing file: " + outputPath);
+                                continue;
+                        }
+
+                        long start = System.nanoTime();
                         convertFile(datFile.getPath(), outputPath, tableInfo, codec);
+                        long end = System.nanoTime();
+
+                        if (runtimes)
+                                System.out.println(
+                                                "Compressing " + tableName + "  took: " + (end - start) / 1e6 + " ms");
+                }
+
+                // Read files and time decompression
+                if (runtimes) {
+                        for (File datFile : datFiles) {
+                                String parquetFile = new File(outputDir,
+                                                (datFile.getName().replace(".dat", ".parquet")))
+                                                .getPath();
+                                try {
+                                        long start = System.nanoTime();
+                                        readFile(parquetFile);
+                                        long end = System.nanoTime();
+                                        System.out.println(
+                                                        "Decompressing " + parquetFile + " took: " + (end - start) / 1e6
+                                                                        + " ms");
+                                } catch (IOException e) {
+                                        e.printStackTrace();
+                                }
+                        }
+                }
+        }
+
+        private static void readFile(String parquetPath) throws IOException {
+                Configuration conf = new Configuration();
+                Path path = new Path(parquetPath);
+
+                int rowCount = 0;
+                try (ParquetReader<Group> reader = ParquetReader.builder(new GroupReadSupport(), path).withConf(conf)
+                                .build()) {
+                        Group group;
+                        while ((group = reader.read()) != null) {
+                                rowCount++; // just count rows to prevent heap overload
+                        }
                 }
         }
 
