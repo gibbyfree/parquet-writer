@@ -8,7 +8,7 @@ import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Types;
 
-public class TableInfoUtil {
+public class TpcDsTableInfoUtil {
 
     static class TableInfo {
         private final MessageType schema;

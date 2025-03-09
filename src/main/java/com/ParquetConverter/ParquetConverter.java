@@ -4,8 +4,7 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.schema.MessageType;
 
-import com.ParquetConverter.TableInfoUtil.TableInfo;
-import static com.ParquetConverter.TableInfoUtil.getTableInfo;
+import com.ParquetConverter.TpcDsTableInfoUtil.TableInfo;
 
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.hadoop.conf.Configuration;
@@ -23,27 +22,29 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
+import java.util.regex.Pattern;
 
-public class DatToParquetConverter {
+public class ParquetConverter {
 
         public static void main(String[] args) {
-                if (args.length < 2) {
+                if (args.length < 3) {
                         System.err.println(
-                                        "Usage: DatToParquetConverter <inputDir> <outputDir> [compression] [--perf]");
+                                        "Usage: ParquetConverter [imdb|tpcsds] <inputDir> <outputDir> [compression] [--perf]");
                         System.exit(1);
                 }
 
-                String inputDir = args[0];
-                String outputDir = args[1];
+                String mode = args[0];
+                String inputDir = args[1];
+                String outputDir = args[2];
 
                 String compression = "";
-                if (args.length > 2) {
-                        compression = args[2];
-                }
-
                 boolean runtimes = false;
-                if (args.length == 4 && args[3].equals("--perf")) {
-                        runtimes = true;
+                for (int i = 3; i < args.length; i++) {
+                        if (args[i].equals("--perf")) {
+                                runtimes = true;
+                        } else {
+                                compression = args[i];
+                        }
                 }
 
                 CompressionCodecName codec = CompressionCodecName.UNCOMPRESSED;
@@ -61,17 +62,19 @@ public class DatToParquetConverter {
                                 break;
                 }
 
-                File[] datFiles = new File(inputDir).listFiles((dir, name) -> name.endsWith(".dat"));
+                String pattern = mode.equals("tpcds") ? ".dat" : ".tsv";
+                File[] inputFiles = new File(inputDir).listFiles((dir, name) -> name.endsWith(pattern));
 
-                if (datFiles == null) {
-                        System.err.println("No .dat files found in input directory: " + inputDir);
+                if (inputFiles == null) {
+                        System.err.println("No input files found in directory: " + inputDir);
                         return;
                 }
 
                 // Convert to parquet and time compression
-                for (File datFile : datFiles) {
-                        String tableName = datFile.getName().replace(".dat", "");
-                        TableInfo tableInfo = getTableInfo(tableName);
+                for (File inputFile : inputFiles) {
+                        String tableName = inputFile.getName().replace(pattern, "");
+                        TableInfo tableInfo = mode.equals("tpcds") ? TpcDsTableInfoUtil.getTableInfo(tableName)
+                                        : ImdbTableInfoUtil.getTableInfo(tableName);
 
                         if (tableInfo == null) {
                                 System.err.println("Skipping unknown table: " + tableName);
@@ -87,19 +90,19 @@ public class DatToParquetConverter {
                         }
 
                         long start = System.nanoTime();
-                        convertFile(datFile.getPath(), outputPath, tableInfo, codec);
+                        convertFile(inputFile.getPath(), outputPath, tableInfo, codec);
                         long end = System.nanoTime();
 
                         if (runtimes)
                                 System.out.println(
-                                                "Compressing " + tableName + "  took: " + (end - start) / 1e6 + " ms");
+                                                "Compressing " + tableName + " took: " + (end - start) / 1e6 + " ms");
                 }
 
                 // Read files and time decompression
                 if (runtimes) {
-                        for (File datFile : datFiles) {
+                        for (File inputFile : inputFiles) {
                                 String parquetFile = new File(outputDir,
-                                                (datFile.getName().replace(".dat", ".parquet")))
+                                                (inputFile.getName().replace(pattern, ".parquet")))
                                                 .getPath();
                                 try {
                                         long start = System.nanoTime();
@@ -148,10 +151,11 @@ public class DatToParquetConverter {
 
                         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
 
+                        String delimiter = inputPath.endsWith(".tsv") ? "\t" : "|";
                         try (BufferedReader br = new BufferedReader(new FileReader(inputPath))) {
                                 String line;
                                 while ((line = br.readLine()) != null) {
-                                        String[] fields = line.split("\\|", -1);
+                                        String[] fields = line.split(Pattern.quote(delimiter), -1);
 
                                         // Check primary key fields
                                         boolean pkValid = true;

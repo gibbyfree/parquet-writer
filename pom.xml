@@ -72,7 +72,7 @@
               <goal>java</goal>
             </goals>
             <configuration>
-              <mainClass>com.ParquetConverter.DatToParquetConverter</mainClass>
+              <mainClass>com.ParquetConverter.ParquetConverter</mainClass>
             </configuration>
           </execution>
         </executions>
